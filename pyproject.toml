@@ -7,11 +7,16 @@ readme = "README.md"
 packages = [{include = "quantified_strategies"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
-
+python = ">=3.11,<3.12"
+yfinance = "^0.2.36"
+matplotlib = "^3.8.2"
+cvxpy = "^1.4.2"
+scikit-learn = "^1.4.0"
 
 [tool.poetry.group.dev.dependencies]
-black = "^24.1.1"
+black = "24.1.1"
+jupyter = "^1.0.0"
+rpds-py = "0.5.3"
 
 [build-system]
 requires = ["poetry-core"]
