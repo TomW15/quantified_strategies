@@ -168,6 +168,7 @@ def describe(returns: pd.Series, pos: pd.Series = None, daily: bool = True, asse
     ann_sortino_ratio = sortino_ratio * np.sqrt(252 * activity_ratio)
     calmar_ratio = tot_ret / drawdown_statistics["max_drawdown"]
     hit_ratio = (active_returns>0).mean()
+    profit_factor = -active_returns[active_returns > 0].sum() / active_returns[active_returns < 0].sum()
     
     statistics = {
         "Asset": asset,
@@ -199,6 +200,7 @@ def describe(returns: pd.Series, pos: pd.Series = None, daily: bool = True, asse
         "Ann. Sortino Ratio": round(ann_sortino_ratio, 4),   
         "Daily Calmar Ratio": round(calmar_ratio, 4),
         "Hit Ratio": f"{hit_ratio:.2%}",
+        "Profit Factor": f"{profit_factor:.2f}x",
 
         # Drawdown
         "MDD": f"{-drawdown_statistics['max_drawdown']:.2%}",
