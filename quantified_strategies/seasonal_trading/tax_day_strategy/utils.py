@@ -12,17 +12,48 @@ import typing as t
 import warnings
 import yfinance as yf
 
-import constants
+try:
+    from . import constants
+except ImportError:
+    import constants
+
+try:
+    from . import activity as act
+except ImportError:
+    import activity as act
+
+from quantified_strategies import strategy_utils as utils
 
 
-def get_data(ticker: str) -> pd.Series:
-    with warnings.catch_warnings(action="ignore"):
-        data = yf.download(tickers=ticker, progress=False)["Adj Close"]
-        return data
+def run(ticker: str = None, data: pd.DataFrame = None, full: bool = False, start: dt.date = None, end: dt.date = None, **kwargs) -> pd.DataFrame:
+
+    if data is None:
+        assert ticker is not None
+        data = utils.get_data(ticker=ticker, columns="Adj Close")
+        if start is not None:
+            data = data.loc[data.index.date >= start]
+        if end is not None:
+            data = data.loc[data.index.date <= end]
+        data = data.to_frame(name="asset")
+    
+    data["ret"] = data["asset"].pct_change()
+    data["ret_shifted"] = data["ret"].shift(-1)
+    data["active"] = act.get_activity(data=data, **kwargs)
+    data["strat_ret"] = data["active"] * data["ret_shifted"]
+
+    if not full:
+        return data["active"].replace(False, None) * data["strat_ret"]
+    
+    data["cum_strat_ret"] = utils.get_cumulative_return(returns=data["strat_ret"], total=False)
+    data["cum_hodl_ret"] = utils.get_cumulative_return(returns=data["ret_shifted"], total=False)
+    data["enter_flag"] = data["active"].astype(int).diff().clip(lower=0.0).fillna(0.0).astype(bool)
+    data["trade_number"] = data["enter_flag"].cumsum()
+        
+    return data
 
 
 def get_returns(df: pd.Series) -> pd.Series:
-    rets = df.pct_change().fillna(0.0)
+    rets = df.pct_change().shift(-1).fillna(0.0)
     return rets.loc[~rets.index.year.isin(constants.SKIP_YEARS)]    
 
 
@@ -90,131 +121,6 @@ def get_trade_return(returns: pd.Series, pos: pd.Series) -> pd.Series:
     return trade_returns
 
 
-def get_cumulative_return(returns: pd.Series, total: bool = False) -> pd.Series | float:
-    if total:
-        return (returns + 1).prod() - 1
-    return (returns + 1).cumprod() - 1
-
-    
-def get_drawdown_statistics(returns: pd.Series) -> t.Dict[str, t.Any]:
-
-    cum_ret = get_cumulative_return(returns=returns, total=False)
-
-    # Drawdown
-    drawdown = -(cum_ret - cum_ret.cummax()) / (cum_ret.cummax() + 1)
-    # Max Drawdown
-    max_drawdown = drawdown.max()
-    # Max Drawdown Date
-    max_drawdown_bottom = drawdown.idxmax()
-    # Max Drawdown Start Date
-    max_drawdown_top = cum_ret[:max_drawdown_bottom].idxmax()
-    # Max Drawdown Duration
-    max_drawdown_duration = pd.Timedelta(days=cum_ret[max_drawdown_top:max_drawdown_bottom].shape[0])
-    # Max Drawdown Recovery Date
-    try:
-        max_drawdown_recovery = cum_ret[(cum_ret >= (cum_ret[max_drawdown_top] + 1e-8)) & (cum_ret.index > max_drawdown_top)].index[0]
-    except IndexError:
-        max_drawdown_recovery = None
-    # Max Drawdown Recovery Duration
-    max_drawdown_recovery_duration = None if max_drawdown_recovery is None else pd.Timedelta(days=cum_ret[max_drawdown_bottom:max_drawdown_recovery].shape[0])
-
-    drawdown_duration = {
-        "drawdown": drawdown,
-        "max_drawdown": max_drawdown,
-        "max_drawdown_bottom": max_drawdown_bottom.date(),
-        "max_drawdown_top": max_drawdown_top.date(),
-        "max_drawdown_duration": max_drawdown_duration.days,
-        "max_drawdown_recovery": max_drawdown_recovery if max_drawdown_recovery is None else max_drawdown_recovery.date(),
-        "max_drawdown_recovery_duration": max_drawdown_recovery_duration if max_drawdown_recovery_duration is None else max_drawdown_recovery_duration.days,
-    }
-
-    return drawdown_duration
-
-
-def describe(returns: pd.Series, pos: pd.Series = None, daily: bool = True, asset: str = None) -> pd.Series:
-
-    asset = asset or "Undefined"
-    
-    if pos is None:
-        pos = pd.Series(1, index=returns.index, dtype=int)
-
-    active_returns = returns[pos != 0.0]
-
-    # Activity
-    activity_ratio = active_returns.shape[0] / returns.shape[0]
-    number_of_trades = pos.diff().clip(lower=0.0).sum()
-    average_hold_period = activity_ratio * returns.shape[0] / (number_of_trades or 1)
-    
-    # Return Statistics
-    mu_ret = active_returns.mean()
-    med_ret = active_returns.median()
-    std_ret = active_returns.std()
-    tot_ret = get_cumulative_return(returns=active_returns, total=True)
-    cum_ret = get_cumulative_return(returns=active_returns, total=False)
-    ret_q1 = active_returns[active_returns < med_ret].median()
-    ret_q3 = active_returns[active_returns > med_ret].median()
-    cagr = ((tot_ret + 1) / 1.0) ** (1 / active_returns.shape[0]) - 1
-    trade_cagr = (1 + cagr) ** average_hold_period - 1
-    ann_cagr = (1 + cagr) ** 252 - 1
-
-    # Drawdown
-    drawdown_statistics = get_drawdown_statistics(returns=active_returns)
-    drawdown = drawdown_statistics.pop("drawdown")
-    
-    # Return Ratios
-    sharpe_ratio = mu_ret / std_ret
-    ann_sharpe_ratio = sharpe_ratio * np.sqrt(252 * activity_ratio)
-    sortino_ratio = mu_ret /  active_returns[active_returns <= 0.0].std()
-    ann_sortino_ratio = sortino_ratio * np.sqrt(252 * activity_ratio)
-    calmar_ratio = tot_ret / drawdown_statistics["max_drawdown"]
-    hit_ratio = (active_returns>0).mean()
-    profit_factor = -active_returns[active_returns > 0].sum() / active_returns[active_returns < 0].sum()
-    
-    statistics = {
-        "Asset": asset,
-
-        # Strategy Start-End
-        "Start": returns.index[0].date(),
-        "End": returns.index[-1].date(),
-        
-        # Return Statistics
-        "Mean Return": f"{mu_ret:,.5%}",
-        "Total Return": f"{tot_ret:,.2%}", 
-        "Median Return": f"{med_ret:,.5%}",
-        "1st Quartile": f"{ret_q1:,.5%}",
-        "3rd Quartile": f"{ret_q3:,.5%}",
-        "Std Dev Return": f"{std_ret:,.5%}",
-        "CAGR": f"{cagr * 10_000:.3f} bps",
-        "Trade CAGR": f"{trade_cagr:,.3%}" if any(pos == 0) else "N/A",
-        "Ann. CAGR": f"{ann_cagr:,.3%}" if daily else "N/A",
-
-        # Activity Ratio
-        "Activity Ratio": f"{activity_ratio:.2%}",
-        "Number of Trades": number_of_trades,
-        "Average Hold Period": f"{average_hold_period:,.2f} Days",
-        
-        # Return Ratios
-        "Daily Sharpe Ratio": round(sharpe_ratio, 4),
-        "Ann. Sharpe Ratio": round(ann_sharpe_ratio, 4),
-        "Daily Sortino Ratio": round(sortino_ratio, 4),
-        "Ann. Sortino Ratio": round(ann_sortino_ratio, 4),   
-        "Daily Calmar Ratio": round(calmar_ratio, 4),
-        "Hit Ratio": f"{hit_ratio:.2%}",
-        "Profit Factor": f"{profit_factor:.2f}x",
-
-        # Drawdown
-        "MDD": f"{-drawdown_statistics['max_drawdown']:.2%}",
-        "MDD Start": drawdown_statistics["max_drawdown_top"],
-        "MDD Bottom": drawdown_statistics["max_drawdown_bottom"],
-        "MDD End": drawdown_statistics["max_drawdown_recovery"],
-        "MDD Decline Duration": None if drawdown_statistics['max_drawdown_duration'] is None else f"{drawdown_statistics['max_drawdown_duration']} Days",
-        "MDD Recovery Duration": None if drawdown_statistics['max_drawdown_recovery_duration'] is None else f"{drawdown_statistics['max_drawdown_recovery_duration']} Days",
-        
-    }
-
-    return pd.Series(statistics, dtype=object)
-
-
 def describe_split(returns: pd.Series, pos: pd.Series = None, 
                    train_dates: t.List = None, valid_dates: t.List = None, test_dates: t.List = None, 
                    **kwargs) -> pd.Series:
@@ -255,7 +161,7 @@ def describe_split(returns: pd.Series, pos: pd.Series = None,
     return pd.concat([train_df, valid_df, test_df], axis=0)
 
 
-def plot(rets: pd.Series = None, asset: str = None, **returns: pd.Series):
+def plot(rets: pd.Series = None, asset: str = None, reset_index: bool = False, **returns: pd.Series):
 
     asset = asset or "Strategy"
     if rets is not None:
@@ -266,9 +172,13 @@ def plot(rets: pd.Series = None, asset: str = None, **returns: pd.Series):
 
     for i, (label, ret) in enumerate(returns.items()):
         
-        cum_ret = get_cumulative_return(returns=ret, total=False)
-        drawdown_statistics = get_drawdown_statistics(returns=ret)
+        cum_ret = utils.get_cumulative_return(returns=ret, total=False)
+        drawdown_statistics = utils.get_drawdown_statistics(returns=ret)
         drawdown = drawdown_statistics.pop("drawdown")
+
+        if reset_index:
+            cum_ret = cum_ret.reset_index()[0]
+            drawdown = drawdown.reset_index()[0]
 
         if i == 0:
             ax[0].plot(cum_ret, label=label)
@@ -294,23 +204,6 @@ def plot(rets: pd.Series = None, asset: str = None, **returns: pd.Series):
     plt.show()
 
     return
-
-
-def get_training(df: pd.Series) -> pd.Series:
-    df_train, _ = train_test_split(df, train_size=0.8, shuffle=False)
-    df_train, _ = train_test_split(df_train, train_size=0.5/0.8, shuffle=False)
-    return df_train
-
-
-def get_validation(df: pd.Series) -> pd.Series:
-    df_train, _ = train_test_split(df, train_size=0.8, shuffle=False)
-    _, df_valid = train_test_split(df_train, train_size=0.5/0.8, shuffle=False)
-    return df_valid
-
-
-def get_test(df: pd.Series) -> pd.Series:  
-    _, df_test = train_test_split(df, train_size=0.8, shuffle=False)
-    return df_test
 
 
 def get_statistic(stat_df: pd.DataFrame, stat: str) -> pd.DataFrame:
@@ -343,10 +236,16 @@ def combine_descriptions(**descriptions) -> pd.DataFrame:
     return pd.concat(description_list, axis=0)
 
 
-def get_strategy_returns(ticker: str) -> t.Dict[str, pd.Series]:
+def get_strategy_returns(ticker: str, start: dt.date = None, end: dt.date = None) -> t.Dict[str, pd.Series]:
 
     # Get data from yahoo
-    df = get_data(ticker=ticker)
+    df = utils.get_data(ticker=ticker, columns="Adj Close")
+
+    # Filter data
+    if start:
+        df = df.loc[df.index.date >= start]
+    if end:
+        df = df.loc[df.index.date <= end]
 
     # Calculate returns
     df_ret = get_returns(df=df)
@@ -363,19 +262,22 @@ def get_strategy_returns(ticker: str) -> t.Dict[str, pd.Series]:
     return {"returns": df_ret_strat, "pos": df_pos, "trade_returns": df_ret_trade_strat, "hodl": df_ret}
 
 
-def run(ticker: str, split: bool = None, details: t.Dict[str, pd.Series] = None, do_plot: bool = False) -> None:
+def run2(ticker: str, split: bool = None, details: t.Dict[str, pd.Series] = None, do_plot: bool = False,
+       start: dt.date = None, end: dt.date = None) -> None:
 
     split = constants.SPLIT if split is None else split
+    start = constants.START_DATE if start is None else start
+    end = constants.END_DATE if end is None else end
     
-    strategy_returns = details or get_strategy_returns(ticker=ticker)
+    strategy_returns = details or get_strategy_returns(ticker=ticker, start=start, end=end)
 
     # HODL
     df_ret = strategy_returns["hodl"]
-    hodl = describe_split(returns=df_ret, daily=True, asset=ticker) if split else describe(returns=df_ret, daily=True, asset=ticker)
+    hodl = describe_split(returns=df_ret, daily=True, asset=ticker) if split else utils.describe(returns=df_ret, daily=True, asset=ticker)
 
-    train_dates = get_training(df=df_ret).index.tolist()
-    valid_dates = get_validation(df=df_ret).index.tolist()
-    test_dates = get_test(df=df_ret).index.tolist()
+    train_dates = utils.get_training(df=df_ret).index.tolist()
+    valid_dates = utils.get_validation(df=df_ret).index.tolist()
+    test_dates = utils.get_test(df=df_ret).index.tolist()
     
     # Daily Strategy
     df_ret_strat = strategy_returns["returns"]
@@ -383,7 +285,7 @@ def run(ticker: str, split: bool = None, details: t.Dict[str, pd.Series] = None,
     daily_strat = (
         describe_split(returns=df_ret_strat, pos=df_pos, daily=True, asset=ticker, 
                        train_dates=train_dates, valid_dates=valid_dates, test_dates=test_dates) 
-        if split else describe(returns=df_ret_strat, pos=df_pos, daily=True, asset=ticker)
+        if split else utils.describe(returns=df_ret_strat, pos=df_pos, daily=True, asset=ticker)
     )
     
     # Trade Strategy
@@ -391,7 +293,7 @@ def run(ticker: str, split: bool = None, details: t.Dict[str, pd.Series] = None,
     stat_trade = (
         describe_split(returns=df_ret_trade_strat, daily=False, asset=ticker, 
                        train_dates=train_dates, valid_dates=valid_dates, test_dates=test_dates) 
-        if split else describe(returns=df_ret_trade_strat, daily=False, asset=ticker)
+        if split else utils.describe(returns=df_ret_trade_strat, daily=False, asset=ticker)
     )
 
     if do_plot:

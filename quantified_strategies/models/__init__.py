@@ -1,0 +1,1 @@
+from .nn_asset_allocator_with_position_management import Net as Net_Asset_Allocator_with_Position_Management

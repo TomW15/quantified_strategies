@@ -9,10 +9,17 @@ packages = [{include = "quantified_strategies"}]
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
 yfinance = "^0.2.36"
-matplotlib = "^3.8.2"
 cvxpy = "^1.4.2"
 scikit-learn = "^1.4.0"
+yahoo-earnings-calendar = "^0.6.0"
+matplotlib = "^3.8.2"
 seaborn = "^0.13.2"
+loguru = "^0.7.2"
+pandas-market-calendars = "^4.4.0"
+statsmodels = "^0.14.1"
+torch = "^2.2.0"
+tqdm = "^4.66.2"
+viz_neural_network = { git = "https://github.com/TomW15/viz_neural_network.git", branch = "master"}
 
 [tool.poetry.group.dev.dependencies]
 black = "24.1.1"
