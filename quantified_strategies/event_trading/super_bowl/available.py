@@ -8,7 +8,7 @@ try:
 except ImportError:
     import utils
 
-HOLD_PERIOD = 11
+HOLD_PERIOD = 15
 
 
 def _get_hold_period(super_bowl_date: dt.date, hold_period: int = HOLD_PERIOD) -> t.List[dt.date]:

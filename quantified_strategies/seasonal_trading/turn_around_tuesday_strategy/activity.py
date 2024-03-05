@@ -45,6 +45,7 @@ def is_active(data: pd.DataFrame, date: dt.date = None) -> bool:
     date = dt.date.today() if date is None else date
     
     sample_data = data.loc[data.index.date <= date].copy()
+    # sample_data = sample_data.resample("1d").last()
     sample_data = sample_data.tail(7)
     
     activity = get_activity(data=sample_data)

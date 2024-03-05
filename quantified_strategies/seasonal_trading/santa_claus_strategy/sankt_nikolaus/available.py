@@ -4,9 +4,11 @@ import pandas_market_calendars as mcal
 
 # Create a calendar
 EUREX = mcal.get_calendar("EUREX")
+FRIDAY: int = 4
+THIRD: int = 3
 
 
-def is_available(date: dt.date | pd.Timestamp = None) -> bool:
+def is_available(date: dt.date | pd.Timestamp = None, entry_day: int = FRIDAY, nth_entry_day: int = THIRD) -> bool:
 
     if date is None:
         date = dt.date.today()
@@ -21,18 +23,19 @@ def is_available(date: dt.date | pd.Timestamp = None) -> bool:
     # Define dec 1 of year
     dec1 = dt.date(date.year, 12, 1)
 
-    ### Fetch Third Friday in December
+    ### Fetch nth Entry Day in December
     # Fetch start of week containing dec1
     monday_before_dec1 = dec1 - dt.timedelta(days=dec1.weekday())
-    # Fetch Friday after start of week containing dec1
-    friday_after_monday_before_dec1 = monday_before_dec1 + dt.timedelta(days=4)
+    # Fetch Entry Day after start of week containing dec1
+    entry_day_after_monday_before_dec1 = monday_before_dec1 + dt.timedelta(days=entry_day)
     # If end of business week containing dec14 is before dec14 i.e. dec14 is Sat/Sun, then add a week
-    if friday_after_monday_before_dec1 < dec1:
-        friday_after_dec1 = friday_after_monday_before_dec1 + dt.timedelta(days=7)
+    if entry_day_after_monday_before_dec1 < dec1:
+        entry_day_after_dec1 = entry_day_after_monday_before_dec1 + dt.timedelta(days=7)
     else:
-        friday_after_dec1 = friday_after_monday_before_dec1
+        entry_day_after_dec1 = entry_day_after_monday_before_dec1
+        
     # Define third Friday in December
-    third_friday_of_dec = friday_after_dec1 + dt.timedelta(days=14)
+    nth_entry_day_of_dec = entry_day_after_dec1 + dt.timedelta(days=7 * (nth_entry_day - 1))
 
     ### Fetch last trading day of year
 
@@ -47,9 +50,9 @@ def is_available(date: dt.date | pd.Timestamp = None) -> bool:
     last_trading_day_before_new_year = trading_days_after_Xmas[-1]
 
     # If date in interval after third Friday of December and before last trading day of year
-    return (date >= third_friday_of_dec) & (date < last_trading_day_before_new_year)
+    return (date >= nth_entry_day_of_dec) & (date < last_trading_day_before_new_year)
 
 
-def get_availability(start: dt.date = dt.date(2000, 1, 1), end: dt.date = dt.date.today()) -> pd.Series:
+def get_availability(start: dt.date = dt.date(2000, 1, 1), end: dt.date = dt.date.today(), entry_day: int = FRIDAY, nth_entry_day: int = THIRD) -> pd.Series:
     dates = pd.date_range(start=start, end=end)
-    return pd.Series({date: is_available(date=date) for date in dates}, dtype=bool)
+    return pd.Series({date: is_available(date=date, entry_day=entry_day, nth_entry_day=nth_entry_day) for date in dates}, dtype=bool)

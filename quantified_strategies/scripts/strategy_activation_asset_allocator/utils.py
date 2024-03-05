@@ -11,10 +11,10 @@ DAY_AFTER = True
 DAY_AFTER_STRATEGIES = ["buy_when_yields_are_low"]
 HOLD_DAYS = "hold_days"
 RISK_FREE_RATE = 0.0
+FILE = "strategy_returns_alternative.csv"
 
 
-
-def get_raw_data(assets: str | t.List[str], start: dt.date = None, end: dt.date = None) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
+def get_raw_data(assets: str | t.List[str], file: str, start: dt.date = None, end: dt.date = None) -> t.Tuple[pd.DataFrame, pd.DataFrame]:
 
     def get_y() -> pd.DataFrame:
         
@@ -24,8 +24,8 @@ def get_raw_data(assets: str | t.List[str], start: dt.date = None, end: dt.date 
         return_data = price_data.pct_change()
         
         if CASH in assets:
-            risk_free_rate = strategy_utils.get_data(ticker="^TNX", columns=ENTRY).to_frame(name=CASH)
-            # risk_free_rate = pd.DataFrame(RISK_FREE_RATE, index=return_data.index, columns=[CASH])
+            # risk_free_rate = strategy_utils.get_data(ticker="^TNX", columns=ENTRY, source="yahoo").to_frame(name=CASH)
+            risk_free_rate = pd.DataFrame(RISK_FREE_RATE, index=return_data.index, columns=[CASH])
             risk_free_rate = (1 + risk_free_rate / 100) ** (1 / 252) - 1
             return_data[CASH] = risk_free_rate.reindex(index=return_data.index, method="ffill").bfill()
             
@@ -36,7 +36,7 @@ def get_raw_data(assets: str | t.List[str], start: dt.date = None, end: dt.date 
         return return_data
 
     def get_X() -> pd.DataFrame:
-        strategy_returns = pd.read_csv(f"../outputs/strategy_returns_alternative.csv", index_col=0, header=[0, 1, 2])
+        strategy_returns = pd.read_csv(f"../outputs/{file}", index_col=0, header=[0, 1, 2])
         # strategy_returns = pd.read_csv(f"../outputs/strategy_returns.csv", index_col=0, header=[0, 1, 2])
         
         if DAY_AFTER:

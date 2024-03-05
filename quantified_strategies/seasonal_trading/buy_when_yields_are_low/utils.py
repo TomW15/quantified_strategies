@@ -15,13 +15,13 @@ MAJORITY = np.ceil(MAJORITY_IN_N / 2) / MAJORITY_IN_N
 
 
 def fetch(ticker: str) -> pd.DataFrame:
-    data = utils.get_data(ticker=ticker, columns="Close")
+    data = utils.get_data(ticker=ticker, columns="Close", flt=False)
     data = data.to_frame(name="asset")
     return data
 
 
 def fetch_treasury() -> pd.DataFrame:
-    return utils.get_data(ticker="^TNX", columns="Close")
+    return utils.get_data(ticker="^TNX", columns="Close", source="yahoo")
 
 
 def calculate_ema(data: pd.Series, window: int = EMA_WINDOW_SIZE) -> pd.Series:
@@ -68,8 +68,8 @@ def run(ticker: str = None, data: pd.DataFrame = None, full: bool = False, start
         data = data.loc[data.index.date <= end]
         treasury = treasury.loc[treasury.index.date <= end]
 
-    if len(ticker.split(".")) == 2:
-        print("Check i don't need to adjust for time of day: not trading the future")
+    data = data.reindex(index=data.index.union(treasury.index), method="ffill")
+    treasury = treasury.reindex(index=data.index.union(treasury.index), method="ffill")
     
     data["active"] = act.get_activity(data=data, treasury=treasury)
     data["ret"] = data["asset"].pct_change()

@@ -9,7 +9,7 @@ except ImportError:
 from quantified_strategies import strategy_utils as utils
 
 
-def run(ticker: str = None, data: pd.DataFrame = None, full: bool = False, start: dt.date = None, end: dt.date = None) -> pd.DataFrame:
+def run(ticker: str = None, data: pd.DataFrame = None, full: bool = False, start: dt.date = None, end: dt.date = None, **kwargs) -> pd.DataFrame:
 
     if data is None:
         assert ticker is not None
@@ -22,7 +22,7 @@ def run(ticker: str = None, data: pd.DataFrame = None, full: bool = False, start
     
     data["ret"] = data["asset"].pct_change()
     data["ret_shifted"] = data["ret"].shift(-1)
-    data["active"] = act.get_activity(data=data)
+    data["active"] = act.get_activity(data=data, **kwargs)
     data["strat_ret"] = data["active"] * data["ret_shifted"]
 
     if not full:

@@ -1,6 +1,7 @@
 # packages
 
 import cvxpy as cp
+import datetime as dt
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -9,14 +10,68 @@ import warnings
 import yfinance as yf
 
 
-def get_data(ticker: str, columns: str | t.List[str] = None, **kwargs) -> pd.Series:
+def get_data(ticker: str, columns: str | t.List[str] = None, flt: bool = False, source: str = "eod", **kwargs) -> pd.DataFrame | pd.Series:
     with warnings.catch_warnings(action="ignore"):
-        data = yf.download(tickers=ticker, progress=False, **kwargs)
-        data = data.loc[data["Adj Close"].pct_change().abs() < 4 * data["Adj Close"].pct_change().std()]
+        
+        if source == "yahoo":
+            data = yf.download(tickers=ticker, progress=False, **kwargs)
+            
+        elif source == "eod":
+            
+            print(kwargs)
+            import requests
+            print("remove api from here")
+            url = f"https://eodhd.com/api/eod/{ticker}?api_token=65a9557c3df693.14557024&fmt=json"
+            data = requests.get(url).json()
+            data = pd.DataFrame(data)
+            data = data.rename(columns={"date": "Date", "open": "Open", "high": "High", "low": "Low", "close": "Close", "adjusted_close": "Adj Close"})
+            data = data.set_index("Date")
+            data.index = pd.DatetimeIndex(data.index)
+
+        if flt:
+            data = data.loc[data["Adj Close"].pct_change().abs() < 4 * data["Adj Close"].pct_change().std()]
         if columns is None:
             return data
         data = data[columns]
         return data
+
+
+def get_today_data(ticker: str, columns: str | t.List[str] = None) -> pd.DataFrame | pd.Series:
+    with warnings.catch_warnings(action="ignore"):
+        data = yf.download(
+            tickers=ticker, 
+            progress=False, 
+            interval="1m", 
+            start=dt.date.today() - dt.timedelta(days=1), 
+            end=dt.date.today() + dt.timedelta(days=1),
+        )
+        data = data.loc[data.index.date == dt.date.today()]
+        if columns is None:
+            return data
+        data = data[columns]
+        return data
+
+
+def get_intraday_data(ticker: str, columns: str | t.List[str] = None, start: dt.date = None, end: dt.date = None) -> pd.DataFrame | pd.Series:
+
+    import requests
+    print("remove api from here")
+    url = f"https://eodhd.com/api/intraday/{ticker}?api_token=65a9557c3df693.14557024&fmt=json&interval=1m"
+    data = requests.get(url).json()
+    data = pd.DataFrame(data)
+    data = data.rename(columns={"datetime": "Date", "open": "Open", "high": "High", "low": "Low", "close": "Close"})
+    data = data.set_index("Date")
+    data.index = pd.DatetimeIndex(data.index)
+
+    if start is not None:
+        data = data.loc[data.index.date >= start]
+    if end is not None:
+        data = data.loc[data.index.date <= end]
+    
+    if columns is None:
+        return data
+    data = data[columns]
+    return data
 
  
 def get_cumulative_return(returns: pd.Series, total: bool = False) -> pd.Series | float:
@@ -113,7 +168,8 @@ def describe(returns: pd.Series, pos: pd.Series = None, daily: bool = True, asse
     ann_sharpe_ratio = sharpe_ratio * np.sqrt(252)
     ann_adj_sharpe_ratio = sharpe_ratio * np.sqrt(252 * activity_ratio)
     sortino_ratio = mu_ret /  active_returns[active_returns <= 0.0].std()
-    ann_sortino_ratio = sortino_ratio * np.sqrt(252 * activity_ratio)
+    ann_sortino_ratio = sortino_ratio * np.sqrt(252)
+    ann_adj_sortino_ratio = sortino_ratio * np.sqrt(252 * activity_ratio)
     calmar_ratio = tot_ret / drawdown_statistics["max_drawdown"]
     hit_ratio = (active_returns > 0).mean()
     profit_factor = -active_returns[active_returns > 0].sum() / active_returns[active_returns < 0].sum()
@@ -133,7 +189,7 @@ def describe(returns: pd.Series, pos: pd.Series = None, daily: bool = True, asse
         "3rd Quartile": f"{ret_q3:,.5%}",
         "Std Dev Return": f"{std_ret:,.5%}",
         "CAGR": f"{cagr * 10_000:.3f} bps",
-        "Trade CAGR": f"{trade_cagr:,.3%}" if any(pos == 0) else "N/A",
+        "Trade CAGR": f"{trade_cagr:,.3%}" if daily else "N/A",
         "Ann. CAGR": f"{ann_cagr:,.3%}" if daily else "N/A",
 
         # Activity Ratio
@@ -143,10 +199,11 @@ def describe(returns: pd.Series, pos: pd.Series = None, daily: bool = True, asse
         
         # Return Ratios
         "Daily Sharpe Ratio": round(sharpe_ratio, 4),
-        "Ann. Sharpe Ratio": round(ann_sharpe_ratio, 4),
-        "Adj. Ann. Sharpe Ratio": round(ann_adj_sharpe_ratio, 4),
+        "Ann. Sharpe Ratio": round(ann_sharpe_ratio, 4) if daily else "N/A",
+        "Adj. Ann. Sharpe Ratio": round(ann_adj_sharpe_ratio, 4) if daily else "N/A",
         "Daily Sortino Ratio": round(sortino_ratio, 4),
-        "Ann. Sortino Ratio": round(ann_sortino_ratio, 4),   
+        "Ann. Sortino Ratio": round(ann_sortino_ratio, 4) if daily else "N/A",  
+        "Adj. Ann. Sortino Ratio": round(ann_adj_sortino_ratio, 4) if daily else "N/A", 
         "Daily Calmar Ratio": round(calmar_ratio, 4),
         "Hit Ratio": f"{hit_ratio:.2%}",
         "Profit Factor": f"{profit_factor:.2f}x",
